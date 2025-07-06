@@ -1,0 +1,138 @@
+openapi: 3.0.1
+info:
+  title: Text Normalization API
+  version: 1.0.0
+  description: API for normalizing text using AWS Bedrock Nova LLM
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  timestamp:
+                    type: number
+  /normalize:
+    post:
+      summary: Normalize a single comment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - comment_id
+                - text
+              properties:
+                comment_id:
+                  type: integer
+                  description: Unique identifier for the comment
+                text:
+                  type: string
+                  description: Text to be normalized
+      responses:
+        "200":
+          description: Text normalized successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comment_id:
+                    type: integer
+                  original_text:
+                    type: string
+                  normalized_text:
+                    type: string
+                  processing_time:
+                    type: number
+                  lambda_instance_id:
+                    type: string
+        "400":
+          description: Bad request
+        "500":
+          description: Internal server error
+  /normalize-batch:
+    post:
+      summary: Normalize multiple comments in batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - comments
+              properties:
+                comments:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - comment_id
+                      - text
+                    properties:
+                      comment_id:
+                        type: integer
+                      text:
+                        type: string
+      responses:
+        "200":
+          description: Batch normalization completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        comment_id:
+                          type: integer
+                        original_text:
+                          type: string
+                        normalized_text:
+                          type: string
+                        processing_time:
+                          type: number
+                        lambda_instance_id:
+                          type: string
+        "400":
+          description: Bad request
+        "500":
+          description: Internal server error
+components:
+  schemas:
+    CommentRequest:
+      type: object
+      required:
+        - comment_id
+        - text
+      properties:
+        comment_id:
+          type: integer
+        text:
+          type: string
+    CommentResponse:
+      type: object
+      properties:
+        comment_id:
+          type: integer
+        original_text:
+          type: string
+        normalized_text:
+          type: string
+        processing_time:
+          type: number
+        lambda_instance_id:
+          type: string
