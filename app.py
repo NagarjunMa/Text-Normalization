@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import os 
 import json
 import time
 import pandas as pd
@@ -107,7 +108,7 @@ with st.sidebar:
     # API endpoint configuration
     api_endpoint = st.text_input(
         "API Endpoint",
-        value="http://localhost:8000",
+        value=os.environ.get("API_ENDPOINT", "http://localhost:8000"),
         help="Backend API server endpoint"
     )
     
