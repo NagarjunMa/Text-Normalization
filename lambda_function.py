@@ -5,20 +5,24 @@ import logging
 import re
 from typing import Dict, Any, List
 from botocore.exceptions import ClientError
+from config.settings import get_settings
+
+# Get application settings
+settings = get_settings()
 
 # Configure logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(getattr(logging, settings.log_level))
 
 # Initialize AWS clients
-bedrock_runtime = boto3.client('bedrock-runtime', region_name='us-east-1')
+bedrock_runtime = boto3.client('bedrock-runtime', region_name=settings.aws_region)
 
 class BedrockTextNormalizer:
     """Text normalizer using AWS Bedrock Nova LLM"""
     
     def __init__(self):
         # Nova model ID - using the correct Nova Lite model ID
-        self.model_id = "amazon.nova-lite-v1:0"
+        self.model_id = settings.bedrock_model_id
         
     def create_prompt(self, text: str) -> str:
         """Create a prompt for the LLM to normalize text while preserving numbers"""
@@ -97,48 +101,50 @@ Normalized text:"""
         number_pattern = re.compile(r'__NUMBER_\d+__')
         matches = number_pattern.findall(result)
         
-        
         # Replace each placeholder with its original number from the map
         for placeholder in matches:
             if placeholder in placeholder_map:
                 original_number = placeholder_map[placeholder]
-                print(f"Replacing '{placeholder}' with '{original_number}'")
+                logger.info(f"Replacing '{placeholder}' with '{original_number}'")
                 result = result.replace(placeholder, original_number)
             else:
-                print(f"Warning: Placeholder '{placeholder}' not found in map")
-        
-        return result
+                logger.warning(f"Placeholder '{placeholder}' not found in map")
         
         return result
     
     def normalize_with_bedrock(self, text: str) -> str:
         """Normalize text using Bedrock Nova LLM"""
         try:
+            # Validate input
+            if not text or not text.strip():
+                raise ValueError("Text cannot be empty")
+            
             # Step 1: Extract and preserve numbers
             text_with_placeholders, placeholder_map = self.extract_numbers_before_llm(text)
             
             # Step 2: Create prompt for LLM
             prompt = self.create_prompt(text_with_placeholders)
-            print(f"Prompt: {prompt}") 
+            logger.info(f"Processing text with length: {len(text)}")
             
             # Step 3: Call Bedrock Nova LLM
             request_body = {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "text": prompt
-                                }
-                            ]
-                        }
-                    ],
-                    "inferenceConfig": {
-                        "temperature": 0.7,
-                        "top_p": 0.9
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "text": prompt
+                            }
+                        ]
                     }
+                ],
+                "inferenceConfig": {
+                    "temperature": settings.bedrock_temperature,
+                    "top_p": settings.bedrock_top_p
+                }
             }
             
+            logger.info("Invoking Bedrock Nova LLM")
             response = bedrock_runtime.invoke_model(
                 modelId=self.model_id,
                 contentType="application/json",
@@ -148,20 +154,33 @@ Normalized text:"""
             
             # Step 4: Parse response
             response_body = json.loads(response['body'].read())
-            # Nova model returns 'completion' field
-            normalized_text = response_body.get('output', {}).get('message', {}).get('content', [{}])[0].get('text', '').strip()            
+            normalized_text = response_body.get('output', {}).get('message', {}).get('content', [{}])[0].get('text', '').strip()
+            
+            if not normalized_text:
+                raise ValueError("Empty response from Bedrock API")
             
             # Step 5: Restore numbers using the map
             final_text = self.restore_numbers_after_llm(normalized_text, placeholder_map)
             
+            logger.info(f"Successfully normalized text. Original length: {len(text)}, Final length: {len(final_text)}")
             return final_text
             
         except ClientError as e:
-            logger.error(f"Bedrock API error: {str(e)}")
-            raise Exception(f"Bedrock API error: {str(e)}")
+            error_msg = f"Bedrock API error: {str(e)}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        except ValueError as e:
+            error_msg = f"Validation error: {str(e)}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
+        except json.JSONDecodeError as e:
+            error_msg = f"JSON parsing error: {str(e)}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
         except Exception as e:
-            logger.error(f"Error in text normalization: {str(e)}")
-            raise Exception(f"Text normalization error: {str(e)}")
+            error_msg = f"Unexpected error in text normalization: {str(e)}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
 
 def lambda_handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     """Lambda function handler for text normalization"""

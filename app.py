@@ -9,9 +9,13 @@ import threading
 import re
 from typing import List, Dict, Any
 import logging
+from config.settings import get_settings
+
+# Get application settings
+settings = get_settings()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=getattr(logging, settings.log_level))
 logger = logging.getLogger(__name__)
 
 # Configure page
@@ -108,7 +112,7 @@ with st.sidebar:
     # API endpoint configuration
     api_endpoint = st.text_input(
         "API Endpoint",
-        value=os.environ.get("API_ENDPOINT", "http://localhost:8000"),
+        value=os.environ.get("API_ENDPOINT", settings.api_endpoint),
         help="Backend API server endpoint"
     )
     
@@ -292,21 +296,3 @@ with st.expander("🔧 Debug Information"):
         "Total Processed": st.session_state.total_processed,
         "Results Count": len(st.session_state.results) if 'results' in st.session_state else 0
     })
-
-# Simple Streamlit app - no complex classes
-st.markdown("""
-<div style='text-align: center; color: #666;'>
-    <p>Built with Streamlit • Powered by AWS Bedrock Nova LLM</p>
-</div>
-""", unsafe_allow_html=True)
-
-# Debug information (expandable)
-with st.expander("🔧 Debug Information"):
-    st.json({
-        "API Endpoint": api_endpoint,
-        "Test Mode": test_mode,
-        "Total Processed": st.session_state.total_processed,
-        "Results Count": len(st.session_state.results) if 'results' in st.session_state else 0
-    })
-
-

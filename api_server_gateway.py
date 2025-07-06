@@ -6,30 +6,53 @@ import threading
 from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 import logging
+from config.settings import get_settings
+
+# Get application settings
+settings = get_settings()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=getattr(logging, settings.log_level))
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Text Normalization API Gateway", version="1.0.0")
 
-# Add CORS middleware
+# Add CORS middleware with proper configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
 # Initialize AWS Lambda client
-lambda_client = boto3.client('lambda', region_name='us-east-1')
+lambda_client = boto3.client('lambda', region_name=settings.aws_region)
 
 class CommentRequest(BaseModel):
     comment_id: int
     text: str
+    
+    class Config:
+        # Add validation
+        str_min_length = 1
+        str_max_length = 10000  # Reasonable limit for text input
+    
+    @validator('text')
+    def validate_text(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Text cannot be empty')
+        if len(v.strip()) > 10000:
+            raise ValueError('Text too long (max 10000 characters)')
+        return v.strip()
+    
+    @validator('comment_id')
+    def validate_comment_id(cls, v):
+        if v <= 0:
+            raise ValueError('Comment ID must be positive')
+        return v
 
 class CommentResponse(BaseModel):
     comment_id: int
@@ -40,23 +63,36 @@ class CommentResponse(BaseModel):
 
 class BatchRequest(BaseModel):
     comments: List[CommentRequest]
+    
+    @validator('comments')
+    def validate_comments(cls, v):
+        if not v:
+            raise ValueError('Comments list cannot be empty')
+        if len(v) > 100:  # Reasonable limit for batch processing
+            raise ValueError('Too many comments (max 100)')
+        return v
 
 class BatchResponse(BaseModel):
     results: List[CommentResponse]
 
 def invoke_lambda_function(comment: CommentRequest) -> Dict[str, Any]:
     """Invoke Lambda function for a single comment"""
-    print("inside invoke_lambda_function", comment.comment_id)
+    logger.info(f"Invoking Lambda for comment {comment.comment_id}")
+    
     try:
+        # Validate input before sending to Lambda
+        if not comment.text or len(comment.text.strip()) == 0:
+            raise ValueError("Text cannot be empty")
+        
         # Prepare payload for Lambda
         payload = {
             'comment_id': comment.comment_id,
             'text': comment.text
         }
         
-        # Invoke Lambda function
+        # Invoke Lambda function with timeout
         response = lambda_client.invoke(
-            FunctionName='text-normalization-lambda',  # Update with your Lambda function name
+            FunctionName=settings.lambda_function_name,
             InvocationType='RequestResponse',
             Payload=json.dumps(payload)
         )
@@ -69,16 +105,29 @@ def invoke_lambda_function(comment: CommentRequest) -> Dict[str, Any]:
             if 'body' in response_payload:
                 # Parse the body from API Gateway response
                 body_content = json.loads(response_payload['body'])
+                logger.info(f"Lambda completed successfully for comment {comment.comment_id}")
                 return body_content
             else:
                 # Direct Lambda response
+                logger.info(f"Lambda completed successfully for comment {comment.comment_id}")
                 return response_payload
         else:
-            raise Exception(f"Lambda invocation failed: {response_payload}")
+            error_msg = f"Lambda invocation failed with status {response['StatusCode']}: {response_payload}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
             
+    except ValueError as e:
+        error_msg = f"Validation error: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=400, detail=error_msg)
+    except json.JSONDecodeError as e:
+        error_msg = f"JSON parsing error: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
-        logger.error(f"Error invoking Lambda for comment {comment.comment_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Lambda invocation error: {str(e)}")
+        error_msg = f"Lambda invocation error: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(status_code=500, detail=error_msg)
 
 def invoke_lambda_concurrent(comment: CommentRequest, results: List[Dict], index: int):
     """Invoke Lambda function concurrently and store result"""
