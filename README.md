@@ -2,6 +2,8 @@
 
 A professional text normalization application for insurance underwriting using AWS Bedrock Nova LLM. This tool provides a clean, modern interface for normalizing insurance comments while preserving critical numerical data.
 
+Loom Recording - https://www.loom.com/share/ddbeef3476704744a58d86e8d353e6c5?sid=0f4dc80e-68a1-4663-96da-d450818b97ac
+
 ## 🏗️ Architecture
 
 ```
